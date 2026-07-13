@@ -1,0 +1,582 @@
+local Junkie = loadstring(game:HttpGet("https://jnkie.com/sdk/library.lua"))()
+Junkie.service = "PanduHub"
+Junkie.identifier = "1067628"
+Junkie.provider = "PanduDev"
+
+local function hasFileSystemSupport()
+    return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+end
+
+local function saveVerifiedKey(key)
+    if hasFileSystemSupport() then pcall(function() writefile("PanduHub_key.txt", key) end) end
+end
+
+local function loadVerifiedKey()
+    if not hasFileSystemSupport() then return nil end
+    local ok, content = pcall(function() return readfile("PanduHub_key.txt") end)
+    return ok and content or nil
+end
+
+local function clearSavedKey()
+    if hasFileSystemSupport() then pcall(function() delfile("PanduHub_key.txt") end) end
+end
+
+local function AuthenticatePremium()
+    local savedKey = loadVerifiedKey()
+    local keyToCheck = getgenv().SCRIPT_KEY
+
+    if not keyToCheck or keyToCheck == "" or keyToCheck == "MASUKKAN_KEY_DISINI" then
+        local link = Junkie.get_key_link()
+        if link and setclipboard then setclipboard(link) end
+        game:GetService("Players").LocalPlayer:Kick("\n[PANDU HUB PREMIUM]\nKEY REQUIRED!")
+        return false
+    end
+
+    local result = Junkie.check_key(keyToCheck)
+
+    if result and result.valid then
+        if result.message == "KEYLESS" then
+            getgenv().SCRIPT_KEY = "KEYLESS"
+            return true
+        elseif result.message == "KEY_VALID" then
+            if not savedKey then saveVerifiedKey(keyToCheck) end
+            getgenv().SCRIPT_KEY = keyToCheck
+            return true
+        end
+    else
+        if savedKey then 
+            clearSavedKey() 
+        end
+        
+        local link = Junkie.get_key_link()
+        if link and setclipboard then setclipboard(link) end
+        game:GetService("Players").LocalPlayer:Kick("\n[PANDU HUB PREMIUM]\nScript used on another HWID / Expired Key")
+        return false
+    end
+end
+
+if not AuthenticatePremium() then return end
+
+-- LOAD
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer.PlayerGui
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser") -- Untuk Anti AFK
+
+
+-- Variabel untuk AFK
+AFK_Thread = nil
+PreviousTeam = LocalPlayer.Team and LocalPlayer.Team.Name or "Unknown"
+
+-- Variabel Anti AFK
+local AntiAFK_Running = false
+local AntiAFK_Connection = nil
+
+-- Variable config
+local Config = {
+    AUTO_AFKEscape = false,
+    Webhook_Enabled = false,
+    Webhook_URL = "",
+    ANTI_AFK = true
+}
+
+-- ==================== FUNGSI ANTI AFK ====================
+local function StartAntiAFK()
+    if AntiAFK_Running then return end
+    AntiAFK_Running = true
+    
+    if AntiAFK_Connection then
+        AntiAFK_Connection:Disconnect()
+        AntiAFK_Connection = nil
+    end
+    
+    AntiAFK_Connection = LocalPlayer.Idled:Connect(function()
+        if AntiAFK_Running then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+    
+    if Library then
+        Library:Notify(" Anti AFK Aktif!", 3)
+    end
+end
+
+local function StopAntiAFK()
+    AntiAFK_Running = false
+    if AntiAFK_Connection then
+        AntiAFK_Connection:Disconnect()
+        AntiAFK_Connection = nil
+    end
+    
+    if Library then
+        Library:Notify(" Anti AFK Dinonaktifkan!", 3)
+    end
+end
+
+-- ==================== FUNGSI WEBHOOK ====================
+local function censorUsername(name)
+    if #name <= 2 then
+        return string.rep("*", #name)
+    end
+    return name:sub(1,2) .. string.rep("*", #name - 2)
+end
+
+local function SendWebhook()
+    if not Config.Webhook_Enabled or Config.Webhook_URL == "" then return end
+    
+    task.spawn(function()
+        local lp = Players.LocalPlayer
+        
+        local exp = tostring(lp:GetAttribute("EXP") or "0")
+        local level = tostring(lp:GetAttribute("Level") or "0")
+        local gears = tostring(lp:GetAttribute("Gears") or "0")
+        local screws = tostring(lp:GetAttribute("Screws") or lp:GetAttribute("Screw") or "0")
+        local username = censorUsername(lp.Name)
+        
+        local data = {
+            ["content"] = "",
+            ["embeds"] = {{
+                ["title"] = " Statistik Auto Farm",
+                ["description"] = "Auto Farm!",
+                ["type"] = "rich",
+                ["color"] = 65280,
+                ["fields"] = {
+                    {["name"] = " Username", ["value"] = username, ["inline"] = false},
+                    {["name"] = " Level", ["value"] = level, ["inline"] = true},
+                    {["name"] = " EXP", ["value"] = exp, ["inline"] = true},
+                    {["name"] = " Gears", ["value"] = gears, ["inline"] = true},
+                    {["name"] = " Screws", ["value"] = screws, ["inline"] = true}
+                },
+                ["footer"] = {["text"] = "Pandu Hub Script"}
+            }}
+        }
+        
+        pcall(function()
+            local req = (syn and syn.request) or (http and http.request) or http_request or request or fluxus.request
+            if req then
+                req({
+                    Url = Config.Webhook_URL,
+                    Method = "POST",
+                    Headers = { ["Content-Type"] = "application/json" },
+                    Body = HttpService:JSONEncode(data)
+                })
+            end
+        end)
+    end)
+end
+
+-- ==================== FUNGSI AFK ESCAPE ====================
+local function GetCharacterRoot()
+    local char = Players.LocalPlayer.Character
+    if char then
+        return char:FindFirstChild("HumanoidRootPart")
+    end
+    return nil
+end
+
+local function TeleportToEscape()
+    local root = GetCharacterRoot()
+    local map = workspace:FindFirstChild("Map")
+    if not root or not map then return false end
+    
+    local exitPos = nil
+    
+    pcall(function()
+        for _, obj in ipairs(map:GetDescendants()) do
+            local nameLower = string.lower(obj.Name)
+            if nameLower == "fininshline" or nameLower == "finishline" or string.find(nameLower, "finish") then
+                if obj:IsA("BasePart") then
+                    exitPos = obj.Position
+                    break
+                elseif obj:IsA("Model") then
+                    local part = obj:FindFirstChildWhichIsA("BasePart")
+                    if part then
+                        exitPos = part.Position
+                        break
+                    end
+                end
+            end
+        end
+
+        if not exitPos then
+            if map:FindFirstChild("RooftopHitbox") or map:FindFirstChild("Rooftop") then 
+                exitPos = Vector3.new(3098.16, 454.04, -4918.74)
+            elseif map:FindFirstChild("HooksMeat") then 
+                exitPos = Vector3.new(1546.12, 152.21, -796.72)
+            elseif map:FindFirstChild("churchbell") then 
+                exitPos = Vector3.new(760.98, -20.14, -78.48)
+            else
+                for _, obj in ipairs(map:GetDescendants()) do 
+                    if obj:IsA("MeshPart") and obj.Material == Enum.Material.Limestone then 
+                        exitPos = Vector3.new(-947.90, 152.12, -7579.52)
+                        break 
+                    elseif obj:IsA("MeshPart") and obj.Material == Enum.Material.Leather then 
+                        exitPos = Vector3.new(1546.12, 152.21, -796.72)
+                        break 
+                    end 
+                end
+            end
+        end
+    end)
+    
+    if exitPos then 
+        root.CFrame = CFrame.new(exitPos + Vector3.new(0, 3, 0)) 
+        return true
+    end
+    
+    return false
+end
+
+local function RandomServerHop()
+    local success, result = pcall(function()
+        return game:HttpGet(
+            "https://games.roblox.com/v1/games/" ..
+            tostring(game.PlaceId) ..
+            "/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true"
+        )
+    end)
+
+    if success and result then
+        local data = HttpService:JSONDecode(result)
+        local validServers = {}
+
+        if data and data.data then
+            for _, server in ipairs(data.data) do
+                if type(server) == "table"
+                    and server.id
+                    and server.id ~= game.JobId then
+
+                    table.insert(validServers, server.id)
+                end
+            end
+        end
+
+        if #validServers > 0 then
+            local randomServer = validServers[math.random(#validServers)]
+            game:GetService("TeleportService"):TeleportToPlaceInstance(
+                game.PlaceId,
+                randomServer,
+                LocalPlayer
+            )
+        else
+            if getgenv().Library then
+                getgenv().Library:Notify("Gagal: Tidak ada server yang tersedia.", 3)
+            end
+        end
+    end
+end
+local function HandleAFKLogic(currentTeam)
+    if not Config.AUTO_AFKEscape then return end
+    if AFK_Thread then task.cancel(AFK_Thread) end
+
+    if currentTeam == "Survivors" then
+        AFK_Thread = task.spawn(function()
+            if Library then Library:Notify("AFK Mode ON!", 3) end
+            task.wait(18)
+            
+            if Config.AUTO_AFKEscape and LocalPlayer.Team and LocalPlayer.Team.Name == "Survivors" then
+                if TeleportToEscape() then
+                    if Library then Library:Notify("Berhasil teleport ke exit! Menunggu server...", 3) end
+                else
+                    if Library then Library:Notify("Gagal menemukan exit!", 3) end
+                end
+            end
+            
+            task.wait(5)
+            if Config.AUTO_AFKEscape and LocalPlayer.Team and LocalPlayer.Team.Name == "Survivors" then
+                if Library then Library:Notify("Match (Stuck), mencari server baru...", 3) end
+                RandomServerHop()
+            end
+        end)
+
+    elseif currentTeam == "Spectator" then
+        AFK_Thread = task.spawn(function()
+            if PreviousTeam == "Survivors" then
+                if Library then Library:Notify("Match selesai, mengirim data & mencari server baru...", 3) end
+                
+                SendWebhook()
+                task.wait(5)
+                RandomServerHop()
+            else
+                local isMatchOngoing = false
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p.Team and (p.Team.Name == "Survivors" or p.Team.Name == "Killer") then
+                        isMatchOngoing = true
+                        break
+                    end
+                end
+
+                if isMatchOngoing then
+                    if Library then Library:Notify("Match sedang berlangsung, mencari server baru...", 3) end
+                    task.wait(2)
+                    RandomServerHop()
+                else
+                    if Library then Library:Notify("Menunggu match mulai (Max 2 menit)..", 3) end
+                    task.wait(120) 
+                    if Library then Library:Notify("Waktu tunggu habis, mencari server baru...", 3) end
+                    task.wait(2)
+                    RandomServerHop()
+                end
+            end
+        end)
+
+    elseif currentTeam == "Killer" then
+        AFK_Thread = task.spawn(function()
+            if Library then Library:Notify("Kamu Killer! Mencari server baru...", 3) end
+            task.wait(3)
+            RandomServerHop()
+        end)
+    end
+    
+    PreviousTeam = currentTeam
+end
+
+-- ==================== OBSIDIAN UI SETUP (deividcomsono version) ====================
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+Library.ForceCheckbox = false
+Library.ShowToggleFrameInKeybinds = true
+
+local Window = Library:CreateWindow({
+    Title = "Pandu Hub",
+    Footer = 'Violence District v1.3.7 | https://discord.gg/panduhub',
+    Icon = "109651670989001",
+    IconSize = UDim2.fromOffset(50, 50),
+    NotifySide = "Right",
+    EnableSidebarResize = true,
+    EnableCompacting = true,
+    SidebarCompacted = true,
+    Size = UDim2.fromOffset(450, 1000),
+    CornerRadius = 20,
+    AutoShow = true,
+})
+
+local TabsUI = {
+    Survivor = Window:AddTab("Survivor", "users"),
+    ["UI Settings"] = Window:AddTab("UI Settings", "settings"),
+}
+
+
+-- ==================== TAB SURVIVOR ====================
+-- Auto Farm & Webhook
+local FarmGroup = TabsUI.Survivor:AddLeftGroupbox("Automatic", "bot")
+
+FarmGroup:AddToggle("AutoAFKEscape", {
+    Text = "Afk Auto Farm Survi",
+    Tooltip = "Auto Farm survivor - teleport ke exit dan server hop",
+    Default = false,
+    Callback = function(Value)
+        Config.AUTO_AFKEscape = Value
+        if Value then
+            HandleAFKLogic(LocalPlayer.Team and LocalPlayer.Team.Name or "Unknown")
+        else
+            if AFK_Thread then 
+                task.cancel(AFK_Thread) 
+                AFK_Thread = nil
+            end
+        end
+    end,
+})
+
+FarmGroup:AddToggle("WebhookEnabled", {
+    Text = "Aktifkan Webhook",
+    Tooltip = "Kirim statistik auto farm ke Discord",
+    Default = false,
+    Callback = function(Value)
+        Config.Webhook_Enabled = Value
+    end,
+})
+
+FarmGroup:AddInput("WebhookURL", {
+    Text = "Webhook URL",
+    Tooltip = "Masukkan link webhook Discord kesini",
+    Default = "",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Callback = function(Value)
+        if Value ~= nil and Value ~= "" then
+            Config.Webhook_URL = Value
+        end
+    end,
+})
+
+FarmGroup:AddButton({
+    Text = "Test Webhook",
+    Func = function()
+        if Config.Webhook_URL == "" then
+            Library:Notify({ Title = "Error", Description = "Isi URL Webhook terlebih dahulu!", Time = 3 })
+            return
+        end
+        local tempStatus = Config.Webhook_Enabled
+        Config.Webhook_Enabled = true
+        SendWebhook()
+        Config.Webhook_Enabled = tempStatus
+        Library:Notify({ Title = "Sukses", Description = "Pesan test telah dikirim!", Time = 3 })
+    end,
+})
+
+local AntiAFKGroup = TabsUI.Survivor:AddLeftGroupbox("Anti AFK", "shield")
+
+_G.AutoReconnect = true
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local GuiService = game:GetService("GuiService")
+local TeleportService = game:GetService("TeleportService")
+
+GuiService.ErrorMessageChanged:Connect(function()    	
+	if not _G.AutoReconnect then return end
+    	
+	task.wait(1) 
+    
+    pcall(function()
+        local placeId = game.PlaceId
+        local jobId = game.JobId
+    
+        task.wait(2)
+        
+        if jobId and jobId ~= "" then
+            TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
+        else
+            TeleportService:Teleport(placeId, LocalPlayer)
+        end
+    end)
+end)
+
+--== UI
+AntiAFKGroup:AddToggle("AutoReconnectMainToggle", {
+    Text = "Auto Reconnect",
+    Default = true,  -- ✅ DEFAULT ON
+    Callback = function(Value)
+        _G.AutoReconnect = Value
+        if Value then
+            Library:Notify({
+                Title = "Auto Reconnect",
+                Description = "AKTIF",
+                Time = 2
+            })
+        else
+            Library:Notify({
+                Title = "Auto Reconnect",
+                Description = "NONAKTIF",
+                Time = 2
+            })
+        end
+    end
+})
+
+AntiAFKGroup:AddToggle("AntiAFK_Enable", {
+    Text = " Anti AFK",
+    Tooltip = "Mencegah kick AFK dari Roblox dengan simulasi input",
+    Default = true,
+    Callback = function(Value)
+        Config.ANTI_AFK = Value
+        if Value then
+            StartAntiAFK()
+        else
+            StopAntiAFK()
+        end
+    end,
+})
+
+-- ==================== INITIALIZATION ====================
+-- Setup Auto Reconnect
+
+local function SetupAutoReconnect()
+    TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+        if Config.AUTO_AFKEscape then
+            if getgenv().Library then 
+                getgenv().Library:Notify("Teleport Gagal: " .. tostring(errorMessage) .. ". Mencoba server lain...", 3) 
+            end
+            task.wait(2)
+            RandomServerHop()
+        end
+    end)
+
+    pcall(function()
+        local promptOverlay = CoreGui:WaitForChild("RobloxPromptGui", 5):WaitForChild("promptOverlay", 5)
+        if promptOverlay then
+            promptOverlay.ChildAdded:Connect(function(child)
+                if Config.AUTO_AFKEscape and child.Name == "ErrorPrompt" then
+                    if getgenv().Library then 
+                        getgenv().Library:Notify("Server Penuh/Disconnect! Mencoba server hop...", 3) 
+                    end
+                    
+                    pcall(function() child.Visible = false end)
+                    
+                    task.wait(2.5)
+                    RandomServerHop()
+                end
+            end)
+        end
+    end)
+end
+
+-- Auto start Anti AFK (Default ON)
+task.spawn(function()
+    task.wait(1) -- Tunggu UI selesai
+    if Config.ANTI_AFK then
+        StartAntiAFK()
+    end
+end)
+
+-- Monitor character respawn
+LocalPlayer.CharacterAdded:Connect(function()
+    if Config.ANTI_AFK then
+        task.wait(0.5)
+        StartAntiAFK()
+    end
+end)
+
+SetupAutoReconnect()
+task.spawn(function()
+    while true do
+        task.wait(1)
+    end
+end)
+
+LocalPlayer:GetPropertyChangedSignal("Team"):Connect(function()
+    HandleAFKLogic(LocalPlayer.Team and LocalPlayer.Team.Name or "")
+    if LocalPlayer.Team and LocalPlayer.Team.Name == "Survivors" then
+    end
+end)
+
+-- ==================== UI SETTINGS & SAVE MANAGER ====================
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+ThemeManager:SetFolder("Pandu")
+SaveManager:SetFolder("Pandu/Farm")
+
+SaveManager:BuildConfigSection(TabsUI["UI Settings"])
+ThemeManager:ApplyToTab(TabsUI["UI Settings"])
+
+SaveManager:LoadAutoloadConfig()
+
+-- ==================== NOTIFICATION ====================
+Library:Notify({ Title = "Pandu Hub", Description = "Berhasil Dimuat!", Time = 3 })
